@@ -1,0 +1,76 @@
+#include "HX711.h"       // Incluye la librería HX711 para manejar el módulo de pesaje.
+#include <EEPROM.h>      // Incluye la librería EEPROM para almacenar datos de calibración.
+
+HX711 balanza;           // Crea un objeto `balanza` de la clase HX711.
+
+int DT = A0;             // Pin analógico para el pin de datos de la balanza (DT).
+int CLK = A1;            // Pin analógico para el pin de reloj de la balanza (CLK).
+
+int peso_calibracion = 1034; // Valor del peso de calibración usado para calcular la escala.
+long escala;             // Variable para almacenar la escala de calibración.
+
+void calibration() {
+  boolean conf = true;
+  long adc_lectura_con_peso, adc_lectura_sin_peso;
+
+  // Inicia la calibración de la balanza.
+  Serial.println("Calibrando base de la balanza");
+  delay(3000);                        // Pausa de 3 segundos antes de comenzar.
+  balanza.set_scale();                // Establece la escala predeterminada a 1.
+  balanza.tare(10);                   // Considera que el peso actual es cero (ajusta el punto de cero).
+
+  // Instrucción para colocar el peso de calibración.
+  Serial.println("Coloque el peso de calibración");
+  delay(3000);                        // Espera 3 segundos para que el usuario coloque el peso.
+  adc_lectura_con_peso = balanza.get_value(100); // Obtiene la lectura del ADC con el peso colocado.
+
+  // Instrucción para quitar el peso de calibración.
+  Serial.println("Retire el peso de calibración");
+  delay(3000);                        // Espera 3 segundos para que el usuario quite el peso.
+  adc_lectura_sin_peso = balanza.get_value(100); // Obtiene la lectura del ADC sin el peso.
+
+  // Calcula la escala basada en la diferencia de lecturas y el peso de calibración conocido.
+  escala = (adc_lectura_sin_peso - adc_lectura_con_peso) / peso_calibracion;
+  EEPROM.put(0, escala);              // Guarda la escala en la posición 0 de la memoria EEPROM.
+  delay(100);
+  Serial.println("Calibración completada");
+
+  // Establece la nueva escala calculada.
+  balanza.set_scale(escala);
+  balanza.tare(10);                   // Ajusta el punto de cero después de la calibración.
+}
+
+void setup() {
+  balanza.begin(DT, CLK);             // Inicia la comunicación con el módulo HX711 en los pines DT y CLK.
+  Serial.begin(9600);                 // Inicia la comunicación serie a 9600 baudios.
+
+  EEPROM.get(0, escala);              // Recupera la escala de calibración almacenada en EEPROM.
+
+  balanza.set_scale(escala);          // Establece la escala recuperada.
+  balanza.tare(20);                   // Ajusta el punto de cero para mejorar la precisión.
+}
+
+void loop() {
+  float peso;
+  peso = balanza.get_units(10);       // Obtiene el peso actual (promedio de 10 lecturas).
+
+  // Verifica si hay comandos disponibles en el puerto serie.
+  if (Serial.available() > 0) {
+    char command = Serial.read();     // Lee el comando del puerto serie.
+    switch (command) {
+      case 'C':
+      case 'c':
+        calibration();                // Inicia la calibración si el comando es 'C' o 'c'.
+        break;
+      case 'T':
+      case 't':
+        balanza.tare(20);             // Realiza la tara si el comando es 'T' o 't'.
+        Serial.println("TARA completa.");
+        break;
+      default:
+        break;                        // No hace nada si el comando no es reconocido.
+    }
+  }
+  Serial.println(-peso, 0);           // Imprime el peso actual (con precisión de 0 decimales).
+  delay(250);                         // Espera 250 ms antes de la siguiente lectura.
+}
